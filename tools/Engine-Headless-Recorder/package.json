@@ -1,0 +1,9 @@
+{
+  "name": "engine-headless-recorder",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "High performance headless screen recorder motor",
+  "dependencies": {
+    "puppeteer": "^25.1.0"
+  }
+}
