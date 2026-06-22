@@ -36,7 +36,7 @@ self.onmessage = async (e) => {
       sequenceNumber = 1;
       
       // 2. Carrega o Glue Code do Emscripten para WASM
-      importScripts('/Engine-Headless-Recorder/src/browser/fmp4_muxer_core.js');
+      importScripts('/tools/Engine-Headless-Recorder/src/browser/fmp4_muxer_core.js');
       
       // 3. Aguarda o runtime do WebAssembly estar totalmente pronto
       await wasmReadyPromise;

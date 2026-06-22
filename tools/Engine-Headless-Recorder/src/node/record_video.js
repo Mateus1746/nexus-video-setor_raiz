@@ -20,17 +20,17 @@ process.argv.slice(2).forEach(val => {
 });
 
 // Configurações padrão com parâmetros extraídos da CLI
-const PROJECT_NAME = args.project || 'olhos';
-const CANVAS_SELECTOR = args.canvas || '#nox-canvas';
+const PROJECT_NAME = args.project || process.argv[2] || 'olhos';
+const CANVAS_SELECTOR = args.canvas || '#video-canvas';
 const DURATION_S = args.duration || 35;
 const FPS = args.fps || 60;
 const BITRATE = args.bitrate || 6000000;
 
 const PORT = 8080;
-const PROJECTS_BASE_DIR = path.resolve(__dirname, '../../../'); // Pasta raiz contendo Engine-Headless-Recorder e nexus_media
+const PROJECTS_BASE_DIR = path.resolve(__dirname, '../../../../');
 const OUTPUT_FILE_PATH = args.output 
   ? path.resolve(args.output) 
-  : path.resolve(__dirname, `../../../nexus_media/video/${PROJECT_NAME}/genesis_final_SOTA.mp4`);
+  : path.resolve(PROJECTS_BASE_DIR, 'output.mp4');
 
 // 1. Iniciar servidor HTTP estático local para evitar restrições CORS com o OPFS e Web Workers
 function startLocalServer() {
@@ -117,7 +117,7 @@ async function record() {
     page.on('pageerror', err => console.error(`[BROWSER ERROR] ${err.toString()}`));
 
     // Abrir a fábrica web correspondente usando o servidor local
-    const projectUrl = `http://127.0.0.1:${PORT}/nexus_media/video/${PROJECT_NAME}/index.html?headless=true`;
+    const projectUrl = `http://127.0.0.1:${PORT}/${PROJECT_NAME}/index.html?headless=true`;
     console.log(`[RECORDER] Navegando para ${projectUrl}`);
     await page.goto(projectUrl, { waitUntil: 'networkidle0' });
 
@@ -127,7 +127,7 @@ async function record() {
 
     // 1. Injetar o CoreRecorder dinamicamente na página
     console.log(`[RECORDER] Injetando gravador na página...`);
-    await page.addScriptTag({ url: `http://127.0.0.1:${PORT}/Engine-Headless-Recorder/src/browser/recorder-core.js` });
+    await page.addScriptTag({ url: `http://127.0.0.1:${PORT}/tools/Engine-Headless-Recorder/src/browser/recorder-core.js` });
 
     // 2. Inicializar o gravador no contexto do browser
     console.log(`[RECORDER] Inicializando o CoreRecorder e abrindo fluxo fMP4 no OPFS...`);

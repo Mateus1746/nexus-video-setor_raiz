@@ -7,11 +7,14 @@ def run_unified_pipeline():
 
     # Passo 1: Captação de Notícias e Geração de Roteiros
     print("\n--- Passo 1: Captação de Notícias (Crawler) ---")
-    try:
-        subprocess.run(["uv", "run", "nexus_crawler.py"], check=True)
-    except subprocess.CalledProcessError as e:
-        print(f"❌ Erro ao rodar o crawler: {e}")
-        return
+    if os.path.exists("nexus_crawler.py"):
+        try:
+            subprocess.run(["uv", "run", "nexus_crawler.py"], check=True)
+        except subprocess.CalledProcessError as e:
+            print(f"❌ Erro ao rodar o crawler: {e}")
+            sys.exit(1)
+    else:
+        print("⚠️ nexus_crawler.py não encontrado, pulando passo 1.")
 
     # Passo 2: Geração de Narração e Sincronia de Legendas (Kokoro Local)
     print("\n--- Passo 2: Síntese de Voz (Kokoro Local) ---")
@@ -19,17 +22,21 @@ def run_unified_pipeline():
         subprocess.run(["uv", "run", "python", "conductor/generate_audio.py"], check=True)
     except subprocess.CalledProcessError as e:
         print(f"❌ Erro ao rodar a síntese de voz: {e}")
-        return
+        sys.exit(1)
 
     # Passo 3: Renderização Automática dos Vídeos (Headless Recorder)
     print("\n--- Passo 3: Renderização Headless dos Vídeos ---")
     staging_dir = "pipeline/sync_drive/staging"
     
+    if not os.path.exists(staging_dir):
+        print(f"⚠️ Diretório de staging não encontrado: {staging_dir}")
+        return
+
     rendered_count = 0
-    for canal in ["canal_esquerda", "canal_direita"]:
+    canais = [d for d in os.listdir(staging_dir) if os.path.isdir(os.path.join(staging_dir, d))]
+
+    for canal in canais:
         canal_path = os.path.join(staging_dir, canal)
-        if not os.path.exists(canal_path):
-            continue
         
         for item_name in os.listdir(canal_path):
             item_path = os.path.join(canal_path, item_name)
@@ -49,6 +56,7 @@ def run_unified_pipeline():
                     rendered_count += 1
                 except subprocess.CalledProcessError as e:
                     print(f"❌ Erro ao renderizar {canal}/{item_name}: {e}")
+                    sys.exit(1)
 
     print(f"\n🎉 Pipeline finalizado com sucesso! Total de vídeos renderizados: {rendered_count}")
 
