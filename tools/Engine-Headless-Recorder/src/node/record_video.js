@@ -104,6 +104,10 @@ async function record() {
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-gpu',
+        '--use-gl=swiftshader',
+        '--ignore-gpu-blacklist',
         '--disable-web-security',
         '--font-render-hinting=none'
       ],
