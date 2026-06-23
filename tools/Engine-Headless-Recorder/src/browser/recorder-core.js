@@ -15,7 +15,7 @@ class CoreRecorder {
     this.status = 'INITIALIZING';
     
     // Iniciar o worker do Muxer usando caminho absoluto na origem HTTP (modo clássico para suportar importScripts)
-    this.worker = new Worker('/Engine-Headless-Recorder/src/browser/muxer-worker.js');
+    this.worker = new Worker('/tools/Engine-Headless-Recorder/src/browser/muxer-worker.js');
     
     // Configurar listener para saber quando o worker e o OPFS estão prontos
     const workerReadyPromise = new Promise((resolve) => {
@@ -96,7 +96,7 @@ class CoreRecorder {
       return;
     }
 
-    const timestampUs = timestampMs * 1000; // Converter milissegundos do renderizador para microssegundos
+    const timestampUs = Math.round(timestampMs * 1000); // Converter milissegundos do renderizador para microssegundos
     
     // Criar o frame WebCodecs usando o canvas
     const frame = new VideoFrame(canvas, { timestamp: timestampUs });
@@ -140,4 +140,6 @@ class CoreRecorder {
 }
 
 // Exportar globalmente para acesso fácil via Puppeteer
-window.CoreRecorder = CoreRecorder;
+if (typeof window !== "undefined") { window.CoreRecorder = CoreRecorder; }
+
+export { CoreRecorder };

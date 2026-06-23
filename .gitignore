@@ -11,3 +11,13 @@ assets/generated/
 exports/
 dist/
 .nexus_backups/
+
+# Pipeline Temporary Files
+pipeline/sync_drive/audio_ready/
+pipeline/sync_drive/exports/*_temp.mp4
+
+# Previews we DO want to track:
+!pipeline/sync_drive/exports_final/
+
+# Virtual environments
+.venv/
