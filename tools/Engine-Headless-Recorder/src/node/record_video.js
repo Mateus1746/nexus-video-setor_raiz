@@ -7,7 +7,17 @@ import { fileURLToPath } from 'node:url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-import { spawn } from 'node:child_process';
+import { spawn, execSync } from 'node:child_process';
+import { createRequire } from 'node:module';
+const _require = createRequire(import.meta.url);
+let _ffmpegPath = 'ffmpeg'; // fallback para sistema
+try {
+  const ffmpegInstaller = _require('@ffmpeg-installer/ffmpeg');
+  _ffmpegPath = ffmpegInstaller.path;
+  console.log(`[FFMPEG] Usando binário embutido: ${_ffmpegPath}`);
+} catch {
+  console.log('[FFMPEG] Binário do sistema (fallback)');
+}
 import os from 'node:os';
 // Ler argumentos simples da linha de comando (ex: --project=olhos --duration=10)
 const args = {};
@@ -142,6 +152,16 @@ async function recordCPU() {
   const server = await startLocalServer();
   let browser;
 
+  // Garantir que os assets Vite estão compilados antes de iniciar o browser
+  try {
+    const projectRoot = path.resolve(__dirname, '../../../..');
+    console.log('[CPU-RECORDER] Executando npm run build para compilar assets Vite...');
+    execSync('npm run build', { cwd: projectRoot, stdio: 'inherit', timeout: 120000 });
+    console.log('[CPU-RECORDER] Build concluído.');
+  } catch (buildErr) {
+    console.warn(`[CPU-RECORDER] Build falhou (continuando mesmo assim): ${buildErr.message}`);
+  }
+
   try {
     console.log(`[CPU-RECORDER] Iniciando modo CPU com ${CPU_WORKERS} workers paralelos`);
     console.log(`[CPU-RECORDER] Resolução de captura: ${CAPTURE_WIDTH}x${CAPTURE_HEIGHT} → upscale 1920x1080`);
@@ -208,7 +228,7 @@ async function recordCPU() {
         OUTPUT_FILE_PATH
       ];
 
-      const ffmpeg = spawn('ffmpeg', ffmpegArgs, { stdio: ['pipe', 'inherit', 'inherit'] });
+      const ffmpeg = spawn(_ffmpegPath, ffmpegArgs, { stdio: ['pipe', 'inherit', 'inherit'] });
       ffmpeg.on('error', err => reject(new Error(`FFmpeg não encontrado: ${err.message}. Instale com: apt-get install ffmpeg`)));
       ffmpeg.on('close', code => {
         if (code === 0) resolve();
