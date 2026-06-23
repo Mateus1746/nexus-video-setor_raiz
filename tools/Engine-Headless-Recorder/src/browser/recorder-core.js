@@ -15,7 +15,7 @@ class CoreRecorder {
     this.status = 'INITIALIZING';
     
     // Iniciar o worker do Muxer usando caminho absoluto na origem HTTP (modo clássico para suportar importScripts)
-    this.worker = new Worker('/Engine-Headless-Recorder/src/browser/muxer-worker.js');
+    this.worker = new Worker('/tools/Engine-Headless-Recorder/src/browser/muxer-worker.js');
     
     // Configurar listener para saber quando o worker e o OPFS estão prontos
     const workerReadyPromise = new Promise((resolve) => {
