@@ -1,0 +1,10 @@
+body {
+    margin: 0;
+    background-color: black;
+    overflow: hidden;
+}
+
+#video-canvas {
+    width: 1080px;
+    height: 1920px;
+}

@@ -4,7 +4,7 @@ import wave
 import contextlib
 import sys
 
-def render_story(factory, scene_id):
+def render_story(factory, scene_id, **kwargs):
     print(f"🎬 Iniciando Renderização Headless para {factory} / {scene_id}...")
     
     # 1. Definir caminhos

@@ -1,0 +1,8 @@
+{
+  "name": "setor_raiz",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "node web/build.js"
+  }
+}
