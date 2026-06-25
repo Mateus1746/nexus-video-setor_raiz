@@ -122,8 +122,11 @@ async function renderWorker(browser, projectUrl, canvasSelector, frameIndices, f
   const page = await browser.newPage();
   page.on('console', msg => { if (msg.type() === 'error') console.error(`[BROWSER ERR] ${msg.text()}`); });
   page.on('pageerror', err => console.error(`[BROWSER ERROR] ${err.toString()}`));
-  await page.goto(projectUrl, { waitUntil: 'networkidle0' });
-  await page.evaluate(() => document.fonts.ready);
+  await page.goto(projectUrl, { waitUntil: 'load', timeout: 30000 });
+  await page.evaluate(() => Promise.race([
+    document.fonts.ready,
+    new Promise(r => setTimeout(r, 3000))
+  ]));
 
   // Inicializa cena se disponível
   await page.evaluate(async () => {
@@ -138,7 +141,7 @@ async function renderWorker(browser, projectUrl, canvasSelector, frameIndices, f
   for (const frameIndex of frameIndices) {
     const timeMs = frameIndex * frameIntervalMs;
     await page.evaluate((t, sel) => {
-      if (typeof window.renderFrame === 'function') window.renderFrame(t);
+      if (typeof window.renderFrame === 'function') return window.renderFrame(t);
     }, timeMs, canvasSelector);
     const jpeg = await page.screenshot({
       type: 'jpeg',
@@ -168,12 +171,12 @@ async function recordCPU() {
   }
 
   try {
-    console.log(`[CPU-RECORDER] Iniciando modo CPU com ${CPU_WORKERS} workers paralelos`);
+    console.log(`[CPU-RECORDER] Iniciando modo CPU com ${CPU_WORKERS} workers sequenciais`);
     console.log(`[CPU-RECORDER] Resolução de captura: ${CAPTURE_WIDTH}x${CAPTURE_HEIGHT} → upscale 1920x1080`);
     console.log(`[CPU-RECORDER] Config: ${DURATION_S}s | ${FPS} FPS | ${totalFrames} frames | ${CPU_WORKERS} workers`);
 
     browser = await puppeteer.launch({
-      headless: 'new',
+      headless: true,
       protocolTimeout: 0,
       args: [
         '--no-sandbox',
@@ -204,13 +207,14 @@ async function recordCPU() {
     console.log(`[CPU-RECORDER] Distribuindo ${totalFrames} frames em ${chunks.length} workers...`);
     const renderStart = Date.now();
 
-    // Executar todos os workers em paralelo
-    const results = await Promise.all(
-      chunks.map((frameIndices, wIdx) => {
-        console.log(`[CPU-RECORDER] Worker ${wIdx}: frames ${frameIndices[0]}-${frameIndices[frameIndices.length-1]}`);
-        return renderWorker(browser, projectUrl, CANVAS_SELECTOR, frameIndices, frameIntervalMs, CAPTURE_WIDTH, CAPTURE_HEIGHT, null);
-      })
-    );
+    // Executar workers sequencialmente para evitar TargetCloseError
+    const results = [];
+    for (let wIdx = 0; wIdx < chunks.length; wIdx++) {
+      const frameIndices = chunks[wIdx];
+      console.log(`[CPU-RECORDER] Worker ${wIdx}: frames ${frameIndices[0]}-${frameIndices[frameIndices.length-1]}`);
+      const workerFrames = await renderWorker(browser, projectUrl, CANVAS_SELECTOR, frameIndices, frameIntervalMs, CAPTURE_WIDTH, CAPTURE_HEIGHT, null);
+      results.push(workerFrames);
+    }
 
     const renderElapsed = ((Date.now() - renderStart) / 1000).toFixed(1);
     const allFrames = results.flat().sort((a, b) => a.frameIndex - b.frameIndex);
@@ -278,7 +282,7 @@ async function record() {
 
     // Iniciar Puppeteer
     browser = await puppeteer.launch({
-      headless: 'new',
+      headless: true,
       protocolTimeout: 0,
       args: [
         '--no-sandbox',
