@@ -55,3 +55,7 @@ window.renderFrame = function(timeMs) {
 };
 
 window.__appReady = true;
+
+window.initializeScene = async function() {
+    // Scene is stateless, no async initialization needed
+};

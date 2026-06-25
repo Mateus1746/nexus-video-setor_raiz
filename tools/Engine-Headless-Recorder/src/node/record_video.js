@@ -50,54 +50,59 @@ const CAPTURE_HEIGHT = Math.round((args.height || 720));
 
 
 const PORT = 8080;
-const PROJECTS_BASE_DIR = path.resolve(__dirname, '../../../'); // Pasta raiz contendo Engine-Headless-Recorder e nexus_media
+const PROJECTS_BASE_DIR = path.resolve(__dirname, '../../../../');
+// Auto-detect entry page: Vite projects use dist/index.html, static projects use index.html
+const ENTRY_PAGE = fs.existsSync(path.join(PROJECTS_BASE_DIR, 'dist/index.html')) ? '/dist/index.html' : '/index.html';
 const OUTPUT_FILE_PATH = args.output 
   ? path.resolve(args.output) 
-  : path.resolve(__dirname, `../../../nexus_media/video/${PROJECT_NAME}/genesis_final_SOTA.mp4`);
+  : path.resolve(__dirname, `../../../${PROJECT_NAME}/genesis_final_SOTA.mp4`);
+
+// Helper para servir um arquivo com headers MIME + COOP/COEP
+function serveFile(res, filePath) {
+  const ext = path.extname(filePath).toLowerCase();
+  const mimeTypes = {
+    '.html': 'text/html',
+    '.css': 'text/css',
+    '.js': 'application/javascript',
+    '.wasm': 'application/wasm',
+    '.json': 'application/json',
+    '.mp4': 'video/mp4',
+  };
+  const contentType = mimeTypes[ext] || 'application/octet-stream';
+  res.writeHead(200, {
+    'Content-Type': contentType,
+    'Cross-Origin-Opener-Policy': 'same-origin',
+    'Cross-Origin-Embedder-Policy': 'require-corp',
+  });
+  const stream = fs.createReadStream(filePath);
+  stream.pipe(res);
+}
 
 // 1. Iniciar servidor HTTP estático local para evitar restrições CORS com o OPFS e Web Workers
 function startLocalServer() {
   const server = http.createServer((req, res) => {
-    // Decodificar URL e remover parâmetros de consulta
     const urlPath = decodeURIComponent(req.url.split('?')[0]);
     const filePath = path.join(PROJECTS_BASE_DIR, urlPath);
 
-    // Garantir proteção contra Path Traversal
     if (!filePath.startsWith(PROJECTS_BASE_DIR)) {
       res.statusCode = 403;
       res.end('Forbidden');
       return;
     }
 
-    fs.stat(filePath, (err, stats) => {
-      if (err || !stats.isFile()) {
+    // Try project root first, fall back to dist/ for Vite build output
+    const tryPaths = [filePath, path.join(PROJECTS_BASE_DIR, 'dist', urlPath)];
+    (function tryServe(idx) {
+      if (idx >= tryPaths.length) {
         res.statusCode = 404;
         res.end('Not Found');
         return;
       }
-
-      // Tipos MIME necessários para a pipeline
-      const ext = path.extname(filePath).toLowerCase();
-      const mimeTypes = {
-        '.html': 'text/html',
-        '.css': 'text/css',
-        '.js': 'application/javascript',
-        '.wasm': 'application/wasm',
-        '.json': 'application/json',
-        '.mp4': 'video/mp4',
-      };
-      const contentType = mimeTypes[ext] || 'application/octet-stream';
-
-      res.writeHead(200, {
-        'Content-Type': contentType,
-        // Cabeçalhos de segurança CORS exigidos para WebCodecs e isolamento de Workers/SharedBuffers
-        'Cross-Origin-Opener-Policy': 'same-origin',
-        'Cross-Origin-Embedder-Policy': 'require-corp',
+      fs.stat(tryPaths[idx], (err, stats) => {
+        if (err || !stats.isFile()) return tryServe(idx + 1);
+        serveFile(res, tryPaths[idx]);
       });
-
-      const stream = fs.createReadStream(filePath);
-      stream.pipe(res);
-    });
+    })(0);
   });
 
   return new Promise((resolve) => {
@@ -169,12 +174,15 @@ async function recordCPU() {
 
     browser = await puppeteer.launch({
       headless: 'new',
+      protocolTimeout: 0,
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
         '--disable-dev-shm-usage',
-        '--disable-gpu',
-        '--use-gl=swiftshader',
+        '--use-gl=angle',
+        '--use-angle=swiftshader',
+        '--enable-unsafe-swiftshader',
+        '--disable-gpu-sandbox',
         '--ignore-gpu-blacklist',
         '--disable-web-security',
         '--font-render-hinting=none'
@@ -182,7 +190,7 @@ async function recordCPU() {
       defaultViewport: { width: CAPTURE_WIDTH, height: CAPTURE_HEIGHT }
     });
 
-    const projectUrl = `http://127.0.0.1:${PORT}/nexus_media/video/${PROJECT_NAME}/index.html?headless=true`;
+    const projectUrl = `http://127.0.0.1:${PORT}${ENTRY_PAGE}?headless=true`;
 
     // Dividir frames entre workers
     const chunkSize = Math.ceil(totalFrames / CPU_WORKERS);
@@ -271,12 +279,15 @@ async function record() {
     // Iniciar Puppeteer
     browser = await puppeteer.launch({
       headless: 'new',
+      protocolTimeout: 0,
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
         '--disable-dev-shm-usage',
-        '--disable-gpu',
-        '--use-gl=swiftshader',
+        '--use-gl=angle',
+        '--use-angle=swiftshader',
+        '--enable-unsafe-swiftshader',
+        '--disable-gpu-sandbox',
         '--ignore-gpu-blacklist',
         '--disable-web-security',
         '--font-render-hinting=none'
@@ -291,7 +302,7 @@ async function record() {
     page.on('pageerror', err => console.error(`[BROWSER ERROR] ${err.toString()}`));
 
     // Abrir a fábrica web correspondente usando o servidor local
-    const projectUrl = `http://127.0.0.1:${PORT}/nexus_media/video/${PROJECT_NAME}/index.html?headless=true`;
+    const projectUrl = `http://127.0.0.1:${PORT}${ENTRY_PAGE}?headless=true`;
     console.log(`[RECORDER] Navegando para ${projectUrl}`);
     await page.goto(projectUrl, { waitUntil: 'networkidle0' });
 
