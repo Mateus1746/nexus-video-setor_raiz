@@ -162,7 +162,7 @@ async function renderChunk(browser, projectUrl, canvasSelector, frameIndices, fr
 }
 
 async function renderAllFrames(browser, projectUrl, canvasSelector, totalFrames, frameIntervalMs, captureWidth, captureHeight) {
-  const CHUNK_SIZE = 25; // ~1s at 25fps, avoids Chrome headless crash after ~50 screenshots
+  const CHUNK_SIZE = 100; // 100 frames (~4s) — Chrome RSS stays at 63MB (testado), elimina overhead de contexto
   const results = [];
   for (let start = 0; start < totalFrames; start += CHUNK_SIZE) {
     const end = Math.min(start + CHUNK_SIZE, totalFrames);
