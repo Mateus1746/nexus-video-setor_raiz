@@ -49,7 +49,7 @@ const CAPTURE_HEIGHT = Math.round((args.height || 720));
 // ─────────────────────────────────────────────────────────────────────────────
 
 
-const PORT = 8080;
+let PORT; // assigned dynamically by startLocalServer
 const PROJECTS_BASE_DIR = path.resolve(__dirname, '../../../../');
 // Auto-detect entry page: Vite projects use dist/index.html, static projects use index.html
 const ENTRY_PAGE = fs.existsSync(path.join(PROJECTS_BASE_DIR, 'dist/index.html')) ? '/dist/index.html' : '/index.html';
@@ -91,7 +91,8 @@ function startLocalServer() {
     }
 
     // Try project root first, fall back to dist/ for Vite build output
-    const tryPaths = [filePath, path.join(PROJECTS_BASE_DIR, 'dist', urlPath)];
+    const relativePath = urlPath.replace(/^\//, '');
+    const tryPaths = [filePath, path.join(PROJECTS_BASE_DIR, 'dist', relativePath)];
     (function tryServe(idx) {
       if (idx >= tryPaths.length) {
         res.statusCode = 404;
@@ -106,7 +107,8 @@ function startLocalServer() {
   });
 
   return new Promise((resolve) => {
-    server.listen(PORT, '127.0.0.1', () => {
+    server.listen(0, '127.0.0.1', () => {
+      PORT = server.address().port;
       console.log(`[SERVER] Servidor de desenvolvimento ativo em http://127.0.0.1:${PORT}`);
       resolve(server);
     });
@@ -118,40 +120,58 @@ function startLocalServer() {
 // MODO CPU: FFmpeg + page.screenshot() paralelo
 // Evita WebCodecs em modo software (lento). Usa x264 ultrafast via FFmpeg pipe.
 // ══════════════════════════════════════════════════════════════════════════════
-async function renderWorker(browser, projectUrl, canvasSelector, frameIndices, frameIntervalMs, captureWidth, captureHeight, tempDir) {
-  const page = await browser.newPage();
-  page.on('console', msg => { if (msg.type() === 'error') console.error(`[BROWSER ERR] ${msg.text()}`); });
+async function renderChunk(browser, projectUrl, canvasSelector, frameIndices, frameIntervalMs, captureWidth, captureHeight) {
+  const context = await browser.createBrowserContext();
+  const page = await context.newPage();
   page.on('pageerror', err => console.error(`[BROWSER ERROR] ${err.toString()}`));
+
   await page.goto(projectUrl, { waitUntil: 'load', timeout: 30000 });
+
+  // Wait for fonts (3s timeout)
   await page.evaluate(() => Promise.race([
     document.fonts.ready,
     new Promise(r => setTimeout(r, 3000))
   ]));
 
-  // Inicializa cena se disponível
+  // Wait for renderFrame hook to be available (some projects set it async)
   await page.evaluate(async () => {
     if (typeof window.initializeScene === 'function') await window.initializeScene();
-    if (typeof window.__appReady !== 'undefined') {
-      let attempts = 0;
-      while (!window.__appReady && attempts++ < 100) await new Promise(r => setTimeout(r, 50));
+    while (typeof window.renderFrame !== 'function') {
+      await new Promise(r => setTimeout(r, 50));
     }
   });
 
   const frames = [];
   for (const frameIndex of frameIndices) {
     const timeMs = frameIndex * frameIntervalMs;
-    await page.evaluate((t, sel) => {
-      if (typeof window.renderFrame === 'function') return window.renderFrame(t);
-    }, timeMs, canvasSelector);
-    const jpeg = await page.screenshot({
-      type: 'jpeg',
-      quality: 90,
-      clip: { x: 0, y: 0, width: captureWidth, height: captureHeight }
-    });
-    frames.push({ frameIndex, jpeg });
+    try {
+      await page.evaluate((t) => { window.renderFrame(t); }, timeMs);
+      const jpeg = await page.screenshot({
+        type: 'jpeg',
+        quality: 70,
+        captureBeyondViewport: false
+      });
+      frames.push({ frameIndex, jpeg });
+    } catch (ssErr) {
+      console.error(`[RENDER] Screenshot error at frame ${frameIndex}: ${ssErr.message}`);
+      break;
+    }
   }
-  await page.close();
+  await context.close();
   return frames;
+}
+
+async function renderAllFrames(browser, projectUrl, canvasSelector, totalFrames, frameIntervalMs, captureWidth, captureHeight) {
+  const CHUNK_SIZE = 25; // ~1s at 25fps, avoids Chrome headless crash after ~50 screenshots
+  const results = [];
+  for (let start = 0; start < totalFrames; start += CHUNK_SIZE) {
+    const end = Math.min(start + CHUNK_SIZE, totalFrames);
+    const indices = Array.from({ length: end - start }, (_, i) => start + i);
+    console.log(`[RENDER] Chunk ${start}-${end-1} (${indices.length} frames)`);
+    const chunkFrames = await renderChunk(browser, projectUrl, canvasSelector, indices, frameIntervalMs, captureWidth, captureHeight);
+    results.push(chunkFrames);
+  }
+  return results.flat().sort((a, b) => a.frameIndex - b.frameIndex);
 }
 
 async function recordCPU() {
@@ -171,10 +191,12 @@ async function recordCPU() {
   }
 
   try {
-    console.log(`[CPU-RECORDER] Iniciando modo CPU com ${CPU_WORKERS} workers sequenciais`);
+    console.log(`[CPU-RECORDER] Iniciando modo CPU (renderização em página única)`);
     console.log(`[CPU-RECORDER] Resolução de captura: ${CAPTURE_WIDTH}x${CAPTURE_HEIGHT} → upscale 1920x1080`);
     console.log(`[CPU-RECORDER] Config: ${DURATION_S}s | ${FPS} FPS | ${totalFrames} frames | ${CPU_WORKERS} workers`);
 
+    // Viewport define a resolução máxima. Upscale 1920x1080 é feito no FFmpeg.
+    const VIEWPORT_W = 1280, VIEWPORT_H = 720;
     browser = await puppeteer.launch({
       headless: true,
       protocolTimeout: 0,
@@ -182,42 +204,23 @@ async function recordCPU() {
         '--no-sandbox',
         '--disable-setuid-sandbox',
         '--disable-dev-shm-usage',
-        '--use-gl=angle',
-        '--use-angle=swiftshader',
+        '--use-gl=swiftshader',
         '--enable-unsafe-swiftshader',
-        '--disable-gpu-sandbox',
         '--ignore-gpu-blacklist',
         '--disable-web-security',
         '--font-render-hinting=none'
       ],
-      defaultViewport: { width: CAPTURE_WIDTH, height: CAPTURE_HEIGHT }
+      defaultViewport: { width: VIEWPORT_W, height: VIEWPORT_H }
     });
 
     const projectUrl = `http://127.0.0.1:${PORT}${ENTRY_PAGE}?headless=true`;
 
-    // Dividir frames entre workers
-    const chunkSize = Math.ceil(totalFrames / CPU_WORKERS);
-    const chunks = [];
-    for (let w = 0; w < CPU_WORKERS; w++) {
-      const start = w * chunkSize;
-      const end   = Math.min(start + chunkSize, totalFrames);
-      if (start < totalFrames) chunks.push(Array.from({ length: end - start }, (_, i) => start + i));
-    }
-
-    console.log(`[CPU-RECORDER] Distribuindo ${totalFrames} frames em ${chunks.length} workers...`);
+    console.log(`[CPU-RECORDER] Renderizando ${totalFrames} frames em uma única página...`);
     const renderStart = Date.now();
 
-    // Executar workers sequencialmente para evitar TargetCloseError
-    const results = [];
-    for (let wIdx = 0; wIdx < chunks.length; wIdx++) {
-      const frameIndices = chunks[wIdx];
-      console.log(`[CPU-RECORDER] Worker ${wIdx}: frames ${frameIndices[0]}-${frameIndices[frameIndices.length-1]}`);
-      const workerFrames = await renderWorker(browser, projectUrl, CANVAS_SELECTOR, frameIndices, frameIntervalMs, CAPTURE_WIDTH, CAPTURE_HEIGHT, null);
-      results.push(workerFrames);
-    }
+    const allFrames = await renderAllFrames(browser, projectUrl, CANVAS_SELECTOR, totalFrames, frameIntervalMs, CAPTURE_WIDTH, CAPTURE_HEIGHT);
 
     const renderElapsed = ((Date.now() - renderStart) / 1000).toFixed(1);
-    const allFrames = results.flat().sort((a, b) => a.frameIndex - b.frameIndex);
     console.log(`[CPU-RECORDER] Renderização concluída em ${renderElapsed}s. Iniciando encoding com FFmpeg...`);
 
     // Garantir que o diretório de saída existe
@@ -288,10 +291,8 @@ async function record() {
         '--no-sandbox',
         '--disable-setuid-sandbox',
         '--disable-dev-shm-usage',
-        '--use-gl=angle',
-        '--use-angle=swiftshader',
+        '--use-gl=swiftshader',
         '--enable-unsafe-swiftshader',
-        '--disable-gpu-sandbox',
         '--ignore-gpu-blacklist',
         '--disable-web-security',
         '--font-render-hinting=none'
